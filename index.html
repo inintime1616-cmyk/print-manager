@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>印刷專案卡片管理系統 v1.5</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { font-family: 'Segoe UI', Microsoft JhengHei, sans-serif; background-color: #f3f4f6; }
+        .card-shadow { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        /* 月曆專用樣式 */
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background-color: #e5e7eb; border: 1px solid #e5e7eb; }
+        .calendar-cell { background-color: white; min-height: 100px; padding: 4px; }
+        .calendar-header { background-color: #f9fafb; padding: 8px; text-align: center; font-weight: bold; color: #4b5563; font-size: 0.875rem; }
+    </style>
+</head>
+<body>
+
+<div id="app" class="min-h-screen p-6">
+    
+    <!-- 頂部導覽列 -->
+    <header class="mb-8 flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-lg card-shadow gap-4">
+        <h1 class="text-2xl font-bold text-gray-800"><i class="fa-solid fa-print text-indigo-600 mr-2"></i>印刷專案管理系統</h1>
+        <div class="space-x-2 flex overflow-x-auto w-full md:w-auto no-scrollbar">
+            <button @click="currentView = 'dashboard'" :class="currentView === 'dashboard' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'" class="whitespace-nowrap px-4 py-2 rounded-lg font-medium transition">
+                <i class="fa-solid fa-layer-group mr-1"></i> 進行中
+            </button>
+            <button @click="currentView = 'calendar'" :class="currentView === 'calendar' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'" class="whitespace-nowrap px-4 py-2 rounded-lg font-medium transition">
+                <i class="fa-regular fa-calendar-days mr-1"></i> 行事曆
+            </button>
+            <button @click="currentView = 'workspace'" :class="currentView === 'workspace' ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'" class="whitespace-nowrap px-4 py-2 rounded-lg font-medium transition">
+                <i class="fa-solid fa-screwdriver-wrench mr-1"></i> 工藝工作區
+            </button>
+            <button @click="currentView = 'archived'" :class="currentView === 'archived' ? 'bg-gray-600 text-white' : 'text-gray-600 hover:bg-gray-100'" class="whitespace-nowrap px-4 py-2 rounded-lg font-medium transition">
+                <i class="fa-solid fa-box-archive mr-1"></i> 已歸檔
+            </button>
+            <button @click="openNewProjectModal" class="whitespace-nowrap bg-green-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-green-700 transition shadow ml-2">
+                <i class="fa-solid fa-plus mr-1"></i> 新增
+            </button>
+        </div>
+    </header>
+
+    <!-- 頁面：進行中專案 (Dashboard) -->
+    <div v-if="currentView === 'dashboard'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div v-for="project in activeProjects" :key="project.id" class="bg-white rounded-xl p-5 card-shadow border-l-4 relative group" :class="getBorderColor(project)">
+            
+            <!-- 卡片標頭 -->
+            <div class="flex justify-between items-start mb-3">
+                <h3 class="text-xl font-bold text-gray-800 break-words w-8/12">{{ project.name }}</h3>
+                <div class="flex gap-1">
+                    <!-- 新增：編輯按鈕 -->
+                    <button @click="openEditProjectModal(project)" title="編輯專案" class="text-gray-300 hover:text-blue-500 p-1 transition"><i class="fa-solid fa-pen"></i></button>
+                    <button @click="toggleArchive(project)" title="結案歸檔" class="text-gray-300 hover:text-indigo-600 p-1 transition"><i class="fa-solid fa-box-archive text-lg"></i></button>
+                    <button @click="deleteProject(project.id)" title="刪除" class="text-gray-300 hover:text-red-500 p-1 transition"><i class="fa-solid fa-trash text-lg"></i></button>
+                </div>
+            </div>
+            
+            <!-- 工藝標籤 -->
+            <div class="flex flex-wrap gap-2 mb-4">
+                <span v-for="tag in project.tags" :key="tag" class="text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded border border-indigo-100 font-medium">
+                    {{ tag }}
+                </span>
+            </div>
+
+            <!-- 專案總截止日期與狀態 -->
+            <div class="mb-4 p-3 rounded-lg" :class="getDeadlineAlertClass(project.deadline)">
+                <div class="text-sm font-semibold flex items-center">
+                    <i class="fa-regular fa-clock mr-2"></i>
+                    總截止：{{ project.deadline }}
+                </div>
+                <div class="text-xs mt-1 font-bold">{{ getDeadlineStatusText(project.deadline) }}</div>
+            </div>
+
+            <!-- 階段清單 -->
+            <div class="space-y-2">
+                <div v-for="(stage, idx) in project.stages" :key="idx" class="flex items-start justify-between text-sm p-2 rounded hover:bg-gray-50 transition border-b border-gray-100 last:border-0">
+                    <div class="flex items-center pt-1 w-7/12">
+                        <input type="checkbox" v-model="stage.completed" @change="saveData" class="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer shrink-0">
+                        <span class="ml-2 break-all leading-tight" :class="{'line-through text-gray-400': stage.completed, 'text-gray-700': !stage.completed}">
+                            {{ stage.name }}
+                        </span>
+                    </div>
+                    <div class="text-xs whitespace-nowrap pt-1 flex items-center justify-end w-5/12" :class="getStageDateClass(stage)">
+                        <span v-if="!stage.completed && isStageUrgent(stage.deadline)" class="mr-1">
+                            <i class="fa-solid fa-circle-exclamation"></i>
+                        </span>
+                        {{ stage.deadline }}
+                    </div>
+                </div>
+            </div>
+
+            <!-- 底部動作列 -->
+            <div class="mt-4 pt-3 border-t border-gray-100 flex justify-between items-center">
+                <span class="px-2 py-1 rounded text-xs font-bold" :class="getProjectStatusColor(project)">
+                    {{ getProjectStatus(project) }}
+                </span>
+                <button v-if="getProjectStatus(project) === '已完成'" @click="toggleArchive(project)" class="bg-indigo-600 text-white text-xs px-3 py-1 rounded hover:bg-indigo-700 transition animate-pulse">
+                    <i class="fa-solid fa-check mr-1"></i>點此歸檔
+                </button>
+            </div>
+        </div>
+        <div v-if="activeProjects.length === 0" class="col-span-full text-center py-20 text-gray-400">
+            <i class="fa-regular fa-folder-open text-6xl mb-4"></i>
+            <p>目前沒有進行中的專案。</p>
+        </div>
+    </div>
+
+    <!-- 頁面：行事曆 (Calendar) - 新增功能 -->
+    <div v-if="currentView === 'calendar'" class="space-y-4">
+        <div class="flex justify-between items-center bg-white p-4 rounded-xl card-shadow">
+            <button @click="changeMonth(-1)" class="text-gray-600 hover:bg-gray-100 px-3 py-1 rounded"><i class="fa-solid fa-chevron-left"></i> 上個月</button>
+            <h2 class="text-xl font-bold text-gray-800">{{ calendarYear }} 年 {{ calendarMonth + 1 }} 月</h2>
+            <button @click="changeMonth(1)" class="text-gray-600 hover:bg-gray-100 px-3 py-1 rounded">下個月 <i class="fa-solid fa-chevron-right"></i></button>
+        </div>
+
+        <div class="bg-white rounded-xl card-shadow overflow-hidden">
+            <div class="grid grid-cols-7 text-center border-b border-gray-200">
+                <div class="py-2 text-red-500 font-bold text-sm">日</div>
+                <div class="py-2 text-gray-600 font-bold text-sm">一</div>
+                <div class="py-2 text-gray-600 font-bold text-sm">二</div>
+                <div class="py-2 text-gray-600 font-bold text-sm">三</div>
+                <div class="py-2 text-gray-600 font-bold text-sm">四</div>
+                <div class="py-2 text-gray-600 font-bold text-sm">五</div>
+                <div class="py-2 text-gray-500 font-bold text-sm">六</div>
+            </div>
+            <div class="calendar-grid">
+                <!-- 空白格子填充 -->
+                <div v-for="n in firstDayOfMonth" :key="'empty-'+n" class="calendar-cell bg-gray-50"></div>
+                
+                <!-- 日期格子 -->
+                <div v-for="day in daysInMonth" :key="day" class="calendar-cell relative group hover:bg-indigo-50 transition">
+                    <div class="text-xs font-bold text-gray-400 mb-1 pl-1" :class="{'text-indigo-600': isToday(day)}">
+                        {{ day }} <span v-if="isToday(day)" class="ml-1 text-[10px] bg-indigo-600 text-white px-1 rounded">今天</span>
+                    </div>
+                    <!-- 當日專案 -->
+                    <div class="space-y-1 overflow-y-auto max-h-24 no-scrollbar">
+                        <div v-for="p in getProjectsForDate(day)" :key="p.id" 
+                             @click="openEditProjectModal(p)"
+                             class="text-[10px] p-1 rounded cursor-pointer truncate shadow-sm border-l-2" 
+                             :class="getCalendarProjectClass(p)">
+                            {{ p.name }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="text-center text-gray-400 text-sm mt-2">
+            提示：月曆僅顯示「進行中」且截止日在當月的專案，點擊專案可編輯。
+        </div>
+    </div>
+
+    <!-- 頁面：已歸檔專案 (Archived) -->
+    <div v-if="currentView === 'archived'" class="space-y-6">
+        <div class="flex justify-between items-center bg-gray-100 p-4 rounded-lg border border-gray-200">
+            <div class="text-gray-600 text-sm"><i class="fa-solid fa-info-circle mr-2"></i>已結案的歷史專案。</div>
+            <!-- 新增：清空按鈕 -->
+            <button v-if="archivedProjects.length > 0" @click="clearAllArchived" class="bg-red-600 text-white text-xs px-3 py-2 rounded hover:bg-red-700 transition shadow">
+                <i class="fa-solid fa-trash-can mr-1"></i>清空所有歸檔
+            </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div v-for="project in archivedProjects" :key="project.id" class="bg-gray-50 rounded-xl p-5 border border-gray-200 opacity-80 hover:opacity-100 transition">
+                <div class="flex justify-between items-start mb-3">
+                    <h3 class="text-xl font-bold text-gray-600">{{ project.name }}</h3>
+                    <div class="flex gap-2">
+                        <button @click="toggleArchive(project)" title="還原" class="text-green-600 hover:bg-green-100 p-1 rounded"><i class="fa-solid fa-arrow-rotate-left"></i></button>
+                        <button @click="deleteProject(project.id)" title="刪除" class="text-red-300 hover:text-red-500 p-1"><i class="fa-solid fa-trash"></i></button>
+                    </div>
+                </div>
+                <div class="text-xs text-gray-500 mb-2">歸檔日期：{{ project.deadline }}</div>
+                <div class="flex flex-wrap gap-2 mb-2">
+                    <span v-for="tag in project.tags" :key="tag" class="text-xs bg-gray-200 text-gray-600 px-2 py-1 rounded">{{ tag }}</span>
+                </div>
+            </div>
+        </div>
+        <div v-if="archivedProjects.length === 0" class="text-center py-20 text-gray-400">
+            <i class="fa-solid fa-box-open text-6xl mb-4"></i>
+            <p>目前沒有已歸檔的專案。</p>
+        </div>
+    </div>
+
+    <!-- 頁面：工藝工作區 -->
+    <div v-if="currentView === 'workspace'" class="space-y-8">
+        <div v-for="craft in getAllUsedTags()" :key="craft" class="bg-white p-6 rounded-xl card-shadow">
+            <h2 class="text-xl font-bold text-gray-800 mb-4 border-b pb-2 flex items-center">
+                <span class="bg-indigo-100 text-indigo-700 w-8 h-8 rounded-full flex items-center justify-center text-sm mr-2"><i class="fa-solid fa-tag"></i></span>
+                {{ craft }} 工作區
+            </h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm whitespace-nowrap">
+                    <thead class="bg-gray-50 text-gray-600">
+                        <tr>
+                            <th class="p-3">專案名稱</th>
+                            <th class="p-3">目前卡住階段</th>
+                            <th class="p-3">總截止日</th>
+                            <th class="p-3">狀態</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        <tr v-for="project in getProjectsByCraft(craft)" :key="project.id" class="hover:bg-gray-50 cursor-pointer" @click="openEditProjectModal(project)">
+                            <td class="p-3 font-bold">{{ project.name }}</td>
+                            <td class="p-3 text-indigo-600 font-medium">
+                                <i class="fa-solid fa-spinner mr-1 animate-spin" v-if="getCurrentStage(project) !== '✅ 已完成'"></i>
+                                {{ getCurrentStage(project) }}
+                            </td>
+                            <td class="p-3"><span :class="getDeadlineTextClass(project.deadline)">{{ project.deadline }}</span></td>
+                            <td class="p-3"><span class="px-2 py-1 rounded text-xs" :class="getProjectStatusColor(project)">{{ getProjectStatus(project) }}</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 彈出視窗：新增/編輯專案 -->
+    <div v-if="showModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-xl w-full max-w-xl p-6 max-h-[90vh] overflow-y-auto card-shadow">
+            <div class="flex justify-between items-center mb-6">
+                <!-- 動態標題 -->
+                <h2 class="text-2xl font-bold text-gray-800">{{ isEditing ? '編輯專案內容' : '新增印刷專案' }}</h2>
+                <button @click="showModal = false" class="text-gray-400 hover:text-gray-600"><i class="fa-solid fa-times text-xl"></i></button>
+            </div>
+            
+            <div class="space-y-6">
+                <!-- 基本資訊 -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-bold text-gray-700 mb-1">專案名稱</label>
+                        <input v-model="newProject.name" type="text" class="w-full rounded-lg border-gray-300 shadow-sm p-2 border focus:border-indigo-500 focus:ring-indigo-500 bg-gray-50">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold text-gray-700 mb-1">總截止日期</label>
+                        <input v-model="newProject.deadline" type="date" class="w-full rounded-lg border-gray-300 shadow-sm p-2 border bg-gray-50">
+                    </div>
+                </div>
+
+                <!-- 標籤區 -->
+                <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-2">印刷工藝標籤</label>
+                    <div class="flex flex-wrap gap-2 mb-3 min-h-[30px] p-2 bg-gray-50 rounded-lg border border-gray-200">
+                        <span v-for="tag in newProject.tags" :key="tag" class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-sm font-medium flex items-center">
+                            {{ tag }} <button @click="removeTag(tag)" class="ml-2 text-indigo-400 hover:text-indigo-900"><i class="fa-solid fa-times"></i></button>
+                        </span>
+                        <span v-if="newProject.tags.length === 0" class="text-gray-400 text-sm self-center">請選擇下方標籤或自行輸入...</span>
+                    </div>
+
+                    <div class="mb-3">
+                         <p class="text-xs text-gray-500 mb-1">快速選取 / 管理標籤：</p>
+                         <div class="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1">
+                            <span v-for="tag in availableTags" :key="tag" class="inline-flex items-center bg-white border border-gray-300 rounded-full text-xs text-gray-600 overflow-hidden shadow-sm">
+                                <button @click="addTag(tag)" class="px-3 py-1 hover:bg-indigo-50 hover:text-indigo-600 transition h-full">{{ tag }}</button>
+                                <button @click="deleteSavedTag(tag)" class="px-2 py-1 border-l border-gray-200 hover:bg-red-50 hover:text-red-500 transition h-full"><i class="fa-solid fa-times"></i></button>
+                            </span>
+                         </div>
+                    </div>
+
+                    <div class="flex gap-2">
+                        <input v-model="customTagInput" @keyup.enter="addCustomTag" type="text" placeholder="輸入新標籤後按 Enter" class="flex-1 rounded-lg border-gray-300 p-2 border text-sm">
+                        <button @click="addCustomTag" class="bg-gray-800 text-white px-4 py-2 rounded-lg text-sm">新增</button>
+                    </div>
+                </div>
+
+                <!-- 階段區 -->
+                <div>
+                    <div class="flex justify-between items-center mb-2">
+                        <label class="block text-sm font-bold text-gray-700">階段時程</label>
+                        <button @click="addStage" class="text-indigo-600 text-xs font-bold"><i class="fa-solid fa-plus mr-1"></i>新增</button>
+                    </div>
+                    <div class="space-y-2">
+                        <div v-for="(stage, idx) in newProject.stages" :key="idx" class="flex items-center gap-2">
+                            <input type="text" v-model="stage.name" class="flex-1 rounded-md border-gray-300 p-2 border text-sm">
+                            <input type="date" v-model="stage.deadline" class="w-32 rounded-md border-gray-300 p-2 border text-sm">
+                            <button @click="removeStage(idx)" class="text-gray-300 hover:text-red-500 p-2"><i class="fa-solid fa-trash-can"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-6 flex justify-end space-x-3 pt-4 border-t">
+                <button @click="showModal = false" class="px-5 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">取消</button>
+                <button @click="saveProject" class="px-5 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-bold shadow-lg">
+                    {{ isEditing ? '儲存變更' : '建立專案' }}
+                </button>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    const { createApp } = Vue;
+
+    createApp({
+        data() {
+            const today = new Date();
+            return {
+                currentView: 'dashboard',
+                showModal: false,
+                isEditing: false, // 判斷是否為編輯模式
+                
+                // 月曆相關資料
+                calendarYear: today.getFullYear(),
+                calendarMonth: today.getMonth(),
+
+                availableTags: [], 
+                customTagInput: '',
+                newProject: { name: '', deadline: '', tags: [], stages: [] },
+                projects: []
+            }
+        },
+        computed: {
+            activeProjects() {
+                return this.projects.filter(p => !p.archived).sort((a, b) => {
+                        if (!a.deadline) return 1; 
+                        if (!b.deadline) return -1;
+                        return new Date(a.deadline) - new Date(b.deadline);
+                    });
+            },
+            archivedProjects() {
+                return this.projects.filter(p => p.archived).sort((a, b) => new Date(b.deadline) - new Date(a.deadline));
+            },
+            
+            // --- 月曆計算邏輯 ---
+            daysInMonth() {
+                return new Date(this.calendarYear, this.calendarMonth + 1, 0).getDate();
+            },
+            firstDayOfMonth() {
+                return new Date(this.calendarYear, this.calendarMonth, 1).getDay();
+            }
+        },
+        mounted() {
+            const savedData = localStorage.getItem('printProjectSystem_v1');
+            if (savedData) {
+                this.projects = JSON.parse(savedData);
+                this.projects.forEach(p => { if (p.archived === undefined) p.archived = false; });
+            } else {
+                this.projects = [{id: Date.now(), name: '範例：夏季新品海報', deadline: new Date(Date.now() + 86400000 * 5).toISOString().split('T')[0], tags: ['數位印刷', '燙金'], archived: false, stages: [{ name: '設計完稿', deadline: '2023-10-01', completed: true }]}];
+            }
+
+            const savedTagsData = localStorage.getItem('printProjectSystem_allTags');
+            if (savedTagsData) {
+                this.availableTags = JSON.parse(savedTagsData);
+            } else {
+                this.availableTags = ['數位印刷', '燙金', '凸版', 'UV 浮雕', '斬型', '後加工'];
+                this.saveTags();
+            }
+        },
+        methods: {
+            saveData() { localStorage.setItem('printProjectSystem_v1', JSON.stringify(this.projects)); },
+            saveTags() { localStorage.setItem('printProjectSystem_allTags', JSON.stringify(this.availableTags)); },
+            
+            // --- 專案增修邏輯更新 ---
+            openNewProjectModal() {
+                this.isEditing = false;
+                this.newProject = { name: '', deadline: '', tags: [], stages: [{ name: '階段 1', deadline: '', completed: false }] };
+                this.customTagInput = '';
+                this.showModal = true;
+            },
+            // 開啟編輯模式
+            openEditProjectModal(project) {
+                this.isEditing = true;
+                // 深拷貝，避免編輯時直接影響畫面直到按下儲存
+                this.newProject = JSON.parse(JSON.stringify(project));
+                this.customTagInput = '';
+                this.showModal = true;
+            },
+            // 統一儲存邏輯 (新增或更新)
+            saveProject() {
+                if (!this.newProject.name || !this.newProject.deadline) { alert('請填寫完整'); return; }
+                
+                if (this.isEditing) {
+                    // 更新模式
+                    const index = this.projects.findIndex(p => p.id === this.newProject.id);
+                    if (index !== -1) {
+                        this.projects[index] = { ...this.newProject }; // 更新資料
+                    }
+                } else {
+                    // 新增模式
+                    const project = { ...this.newProject, id: Date.now(), archived: false, stages: JSON.parse(JSON.stringify(this.newProject.stages)) };
+                    this.projects.push(project);
+                }
+                
+                this.saveData();
+                this.showModal = false;
+            },
+
+            // --- 標籤功能 ---
+            addTag(tag) { if (!this.newProject.tags.includes(tag)) this.newProject.tags.push(tag); },
+            addCustomTag() {
+                const val = this.customTagInput.trim();
+                if (val) {
+                    if (!this.newProject.tags.includes(val)) this.newProject.tags.push(val);
+                    if (!this.availableTags.includes(val)) {
+                        this.availableTags.push(val);
+                        this.saveTags();
+                    }
+                    this.customTagInput = '';
+                }
+            },
+            deleteSavedTag(tagToDelete) {
+                if(confirm('移除標籤「' + tagToDelete + '」？')) {
+                    this.availableTags = this.availableTags.filter(t => t !== tagToDelete);
+                    this.saveTags();
+                }
+            },
+            removeTag(tag) { this.newProject.tags = this.newProject.tags.filter(t => t !== tag); },
+            
+            // --- 月曆功能 ---
+            changeMonth(delta) {
+                this.calendarMonth += delta;
+                if (this.calendarMonth > 11) {
+                    this.calendarMonth = 0;
+                    this.calendarYear++;
+                } else if (this.calendarMonth < 0) {
+                    this.calendarMonth = 11;
+                    this.calendarYear--;
+                }
+            },
+            isToday(day) {
+                const today = new Date();
+                return day === today.getDate() && this.calendarMonth === today.getMonth() && this.calendarYear === today.getFullYear();
+            },
+            getProjectsForDate(day) {
+                // 產生該日期的字串格式 YYYY-MM-DD
+                const dateStr = new Date(this.calendarYear, this.calendarMonth, day + 1).toISOString().split('T')[0];
+                return this.activeProjects.filter(p => p.deadline === dateStr);
+            },
+            getCalendarProjectClass(project) {
+                const status = this.getProjectStatus(project);
+                if (status === '已完成') return 'bg-green-100 text-green-800 border-green-200';
+                return 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100';
+            },
+
+            // --- 歸檔管理 ---
+            clearAllArchived() {
+                if (confirm('⚠️ 警告：這將會「永久刪除」所有已歸檔的專案，無法復原！\n\n確定要清空嗎？')) {
+                    this.projects = this.projects.filter(p => !p.archived);
+                    this.saveData();
+                }
+            },
+            toggleArchive(project) {
+                if (!project.archived && !confirm('確定要將此專案「結案歸檔」嗎？')) return;
+                project.archived = !project.archived;
+                this.saveData();
+            },
+            deleteProject(id) {
+                if(confirm('確定要刪除此專案嗎？')) {
+                    this.projects = this.projects.filter(p => p.id !== id);
+                    this.saveData();
+                }
+            },
+
+            // --- 視覺與邏輯 (維持不變) ---
+            getAllUsedTags() {
+                const allTags = new Set();
+                this.activeProjects.forEach(p => { p.tags.forEach(t => allTags.add(t)); });
+                return Array.from(allTags).sort();
+            },
+            getProjectsByCraft(craft) { return this.activeProjects.filter(p => p.tags.includes(craft)); },
+            addStage() { this.newProject.stages.push({ name: '', deadline: '', completed: false }); },
+            removeStage(index) { this.newProject.stages.splice(index, 1); },
+            getDiffDays(deadline) {
+                if (!deadline) return 999;
+                return Math.ceil((new Date(deadline) - new Date()) / (1000 * 60 * 60 * 24));
+            },
+            getDeadlineStatusText(deadline) {
+                const diff = this.getDiffDays(deadline);
+                if (diff < 0) return '❌ 已逾期';
+                if (diff <= 3) return '⛔ 時程緊迫 (' + diff + '天)';
+                if (diff <= 7) return '⚠️ 需留意時程 (' + diff + '天)';
+                return '正常 (' + diff + '天)';
+            },
+            getDeadlineAlertClass(deadline) {
+                const diff = this.getDiffDays(deadline);
+                if (diff < 0) return 'bg-red-100 text-red-800 border border-red-200';
+                if (diff <= 3) return 'bg-orange-100 text-orange-800 border border-orange-200';
+                if (diff <= 7) return 'bg-yellow-50 text-yellow-800 border border-yellow-200';
+                return 'bg-green-50 text-green-800 border border-green-200';
+            },
+            getDeadlineTextClass(deadline) {
+                const diff = this.getDiffDays(deadline);
+                if (diff < 0) return 'text-red-600 font-bold';
+                if (diff <= 3) return 'text-orange-600 font-bold';
+                return 'text-gray-600';
+            },
+            getStageDateClass(stage) {
+                if (stage.completed) return 'text-gray-400 line-through decoration-transparent'; 
+                if (!stage.deadline) return 'text-gray-400';
+                const diff = this.getDiffDays(stage.deadline);
+                if (diff < 0) return 'text-red-600 font-bold'; 
+                if (diff <= 3) return 'text-orange-500 font-bold'; 
+                return 'text-gray-500';
+            },
+            isStageUrgent(deadline) { return deadline && this.getDiffDays(deadline) <= 3; },
+            getBorderColor(project) {
+                const status = this.getProjectStatus(project);
+                if (status === '已完成') return 'border-green-500';
+                const diff = this.getDiffDays(project.deadline);
+                if (diff < 0) return 'border-red-500';
+                if (diff <= 3) return 'border-orange-500';
+                return 'border-indigo-500';
+            },
+            getProjectStatus(project) {
+                if (!project.stages || project.stages.length === 0) return '未規劃';
+                const allCompleted = project.stages.every(s => s.completed);
+                if (allCompleted) return '已完成';
+                const anyStarted = project.stages.some(s => s.completed);
+                return anyStarted ? '進行中' : '未開始';
+            },
+            getProjectStatusColor(project) {
+                const s = this.getProjectStatus(project);
+                if (s === '已完成') return 'bg-green-100 text-green-800';
+                if (s === '進行中') return 'bg-blue-100 text-blue-800';
+                return 'bg-gray-200 text-gray-600';
+            },
+            getCurrentStage(project) {
+                if (this.getProjectStatus(project) === '已完成') return '✅ 已完成';
+                if (!project.stages || project.stages.length === 0) return '無階段';
+                const stage = project.stages.find(s => !s.completed);
+                return stage ? stage.name : '未知';
+            }
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
